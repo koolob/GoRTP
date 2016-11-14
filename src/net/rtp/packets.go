@@ -119,6 +119,10 @@ func (rp *RawPacket) InUse() int {
     return rp.inUse
 }
 
+func (rp *RawPacket) Addr() Address {
+    return rp.fromAddr
+}
+
 // *** RTP specific functions start here ***
 
 // RTP packet type to define RTP specific functions
