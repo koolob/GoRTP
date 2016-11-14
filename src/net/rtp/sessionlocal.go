@@ -375,9 +375,9 @@ func (rs *Session) rtcpSenderCheck(rp *CtrlPacket, offset int) (*SsrcStream, uin
 // sendDataCtrlEvent is a helper function to OnRecvData and sends one control event to the application 
 // if the control event chanel is active.
 //
-func (rs *Session) sendDataCtrlEvent(code int, ssrc, index uint32) {
+func (rs *Session) sendDataCtrlEvent(code int, ssrc, index uint32, addr Address) {
     var ctrlEvArr [1]*CtrlEvent
-    ctrlEvArr[0] = newCrtlEvent(code, ssrc, index)
+    ctrlEvArr[0] = newCrtlEvent(code, ssrc, index, addr)
 
     if ctrlEvArr[0] != nil {
         select {
@@ -614,11 +614,12 @@ func rtcpInterval(members, senders int, rtcpBw, avrgSize float64, weSent, initia
 }
 
 // newCrtlEvent is a little helper function to create and initialize a new control event.
-func newCrtlEvent(eventType int, ssrc, idx uint32) (ctrlEv *CtrlEvent) {
+func newCrtlEvent(eventType int, ssrc, idx uint32, addr Address) (ctrlEv *CtrlEvent) {
     ctrlEv = new(CtrlEvent)
     ctrlEv.EventType = eventType
     ctrlEv.Ssrc = ssrc
     ctrlEv.Index = idx
+    ctrlEv.Addr = addr
     return
 }
 

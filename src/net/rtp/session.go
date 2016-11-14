@@ -80,6 +80,7 @@ type CtrlEvent struct {
     Ssrc      uint32 // the input stream's SSRC
     Index     uint32 // and its index
     Reason    string // Resaon string if it was available, empty otherwise
+    Addr      Address
 }
 
 // Use a channel to signal if the transports are really closed.
@@ -444,7 +445,7 @@ func (rs *Session) OnRecvData(rp *DataPacket) bool {
         if !existing {
             str = newSsrcStreamIn(&rp.fromAddr, ssrc)
             if len(rs.streamsIn) > rs.MaxNumberInStreams {
-                rs.sendDataCtrlEvent(MaxNumInStreamReachedData, ssrc, 0)
+                rs.sendDataCtrlEvent(MaxNumInStreamReachedData, ssrc, 0, rp.fromAddr)
                 rp.FreePacket()
                 rs.streamsMapMutex.Unlock()
                 return false
@@ -453,11 +454,11 @@ func (rs *Session) OnRecvData(rp *DataPacket) bool {
             rs.streamInIndex++
             str.streamStatus = active
             str.statistics.initialDataTime = now // First packet arrival time.
-            rs.sendDataCtrlEvent(NewStreamData, ssrc, rs.streamInIndex-1)
+            rs.sendDataCtrlEvent(NewStreamData, ssrc, rs.streamInIndex-1, rp.fromAddr)
         } else {
             // Check if an existing stream is active
             if str.streamStatus != active {
-                rs.sendDataCtrlEvent(WrongStreamStatusData, ssrc, rs.streamInIndex-1)
+                rs.sendDataCtrlEvent(WrongStreamStatusData, ssrc, rs.streamInIndex-1,rp.fromAddr)
                 rp.FreePacket()
                 rs.streamsMapMutex.Unlock()
                 return false
@@ -476,7 +477,7 @@ func (rs *Session) OnRecvData(rp *DataPacket) bool {
         // TODO: also check CSRC identifiers.
         if !str.checkSsrcIncomingData(existing, rs, rp) || !str.recordReceptionData(rp, rs, now) {
             // must be discarded due to collision or loop or invalid source
-            rs.sendDataCtrlEvent(StreamCollisionLoopData, ssrc, rs.streamInIndex-1)
+            rs.sendDataCtrlEvent(StreamCollisionLoopData, ssrc, rs.streamInIndex-1,rp.fromAddr)
             rp.FreePacket()
             return false
         }
@@ -524,15 +525,15 @@ func (rs *Session) OnRecvCtrl(rp *CtrlPacket) bool {
             // Always check sender's SSRC first in case of RR or SR
             str, strIdx, existing := rs.rtcpSenderCheck(rp, offset)
             if str == nil {
-                ctrlEvArr = append(ctrlEvArr, newCrtlEvent(int(strIdx), str.Ssrc(), 0))
+                ctrlEvArr = append(ctrlEvArr, newCrtlEvent(int(strIdx), str.Ssrc(), 0, rp.fromAddr))
             } else {
                 if !existing {
-                    ctrlEvArr = append(ctrlEvArr, newCrtlEvent(NewStreamCtrl, str.Ssrc(), rs.streamInIndex-1))
+                    ctrlEvArr = append(ctrlEvArr, newCrtlEvent(NewStreamCtrl, str.Ssrc(), rs.streamInIndex-1, rp.fromAddr))
                 }
                 str.statistics.lastRtcpSrTime = str.statistics.lastRtcpPacketTime
                 str.readSenderInfo(rp.toSenderInfo(rtcpHeaderLength + rtcpSsrcLength + offset))
 
-                ctrlEvArr = append(ctrlEvArr, newCrtlEvent(RtcpSR, str.Ssrc(), strIdx))
+                ctrlEvArr = append(ctrlEvArr, newCrtlEvent(RtcpSR, str.Ssrc(), strIdx, rp.fromAddr))
 
                 // Offset to first RR block: offset to SR + fixed Header length for SR + length of sender info
                 rrOffset := offset + rtcpHeaderLength + rtcpSsrcLength + senderInfoLen
@@ -543,7 +544,7 @@ func (rs *Session) OnRecvCtrl(rp *CtrlPacket) bool {
                     // Process Receive Reports that match own output streams (SSRC).
                     if exists {
                         strOut.readRecvReport(rr)
-                        ctrlEvArr = append(ctrlEvArr, newCrtlEvent(RtcpRR, rr.ssrc(), idx))
+                        ctrlEvArr = append(ctrlEvArr, newCrtlEvent(RtcpRR, rr.ssrc(), idx, rp.fromAddr))
                     }
                     rrOffset += reportBlockLen
                 }
@@ -558,10 +559,10 @@ func (rs *Session) OnRecvCtrl(rp *CtrlPacket) bool {
             // Always check sender's SSRC first in case of RR or SR
             str, strIdx, existing := rs.rtcpSenderCheck(rp, offset)
             if str == nil {
-                ctrlEvArr = append(ctrlEvArr, newCrtlEvent(int(strIdx), str.Ssrc(), 0))
+                ctrlEvArr = append(ctrlEvArr, newCrtlEvent(int(strIdx), str.Ssrc(), 0, rp.fromAddr))
             } else {
                 if !existing {
-                    ctrlEvArr = append(ctrlEvArr, newCrtlEvent(NewStreamCtrl, str.Ssrc(), rs.streamInIndex-1))
+                    ctrlEvArr = append(ctrlEvArr, newCrtlEvent(NewStreamCtrl, str.Ssrc(), rs.streamInIndex-1, rp.fromAddr))
                 }
 
                 rrCnt := rp.Count(offset)
@@ -573,7 +574,7 @@ func (rs *Session) OnRecvCtrl(rp *CtrlPacket) bool {
                     // Process Receive Reports that match own output streams (SSRC)
                     if exists {
                         strOut.readRecvReport(rr)
-                        ctrlEvArr = append(ctrlEvArr, newCrtlEvent(RtcpRR, rr.ssrc(), idx))
+                        ctrlEvArr = append(ctrlEvArr, newCrtlEvent(RtcpRR, rr.ssrc(), idx, rp.fromAddr))
                     }
                     rrOffset += reportBlockLen
                 }
@@ -598,7 +599,7 @@ func (rs *Session) OnRecvCtrl(rp *CtrlPacket) bool {
                 if !ok {
                     break
                 }
-                ctrlEvArr = append(ctrlEvArr, newCrtlEvent(RtcpSdes, chunk.ssrc(), idx))
+                ctrlEvArr = append(ctrlEvArr, newCrtlEvent(RtcpSdes, chunk.ssrc(), idx, rp.fromAddr))
                 sdesChunkOffset += chunkLen
                 sdesPktLen -= chunkLen
             }
@@ -617,7 +618,7 @@ func (rs *Session) OnRecvCtrl(rp *CtrlPacket) bool {
             if byePkt != nil {
                 // Send BYE control event only for known input streams.
                 if st, idx, ok := rs.lookupSsrcMapIn(byePkt.ssrc(0)); ok {
-                    ctrlEv := newCrtlEvent(RtcpBye, byePkt.ssrc(0), idx)
+                    ctrlEv := newCrtlEvent(RtcpBye, byePkt.ssrc(0), idx,rp.fromAddr)
                     ctrlEv.Reason = byePkt.getReason(byeCnt)
                     ctrlEvArr = append(ctrlEvArr, ctrlEv)
                     st.streamStatus = isClosing
