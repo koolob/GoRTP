@@ -171,7 +171,7 @@ func NewSession(tpw TransportWrite, tpr TransportRecv) *Session {
 //
 func (rs *Session) AddRemote(remote *Address) (index uint32, err error) {
     if (remote.DataPort & 0x1) == 0x1 {
-        return 0, Error("RTP data port number is not an even number.")
+        //return 0, Error("RTP data port number is not an even number.")
     }
     rs.remotes[rs.remoteIndex] = remote
     index = rs.remoteIndex
